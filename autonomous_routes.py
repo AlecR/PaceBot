@@ -18,8 +18,15 @@ camera = PiCamera()
 HEIGHT = 480
 WIDTH = 640
 
+SCALE_FACTOR = 0.25
+
+SCALED_WIDTH = int(WIDTH * SCALE_FACTOR)
+SCALED_HEIGHT = int(HEIGHT * SCALE_FACTOR)
+
+SCALED_X_CENTER = int(SCALED_WIDTH / 2)
+SCALED_Y_CENTER = int(SCALED_HEIGHT / 2)
+
 HORIZ_LINE_WIDTH = (WIDTH * .75)
-HEIGHT_OFFSET = 360
 
 ESC_PIN = 1
 SERVO_PIN = 0
@@ -47,60 +54,44 @@ def follow_line():
   while(True):
     for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True):
       rawCapture.truncate(0)
-      # if auto_mode is False: return
+      if auto_mode is False: return
 
+      # Resize image
       image = frame.array
-      # cropped_image = image[HEIGHT_OFFSET:image.shape[1]]
-      # gray_image = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2GRAY)
-      # #blurred_gray_image = cv2.GaussianBlur(gray_image, (5, 5), 0)
-      # ret, thresh = cv2.threshold(gray_image,180,255,0) 
-      # #thresh = cv2.adaptiveThreshold(blurred_gray_image, 255, cv2.ADAPTIVE_THRESH_MEAN_C,cv2.THRESH_BINARY,11,2)
-      # #thresh = cv2.bitwise_not(thresh)
-      # x, contours, y = cv2.findContours(thresh.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
-      # countrs = []
-      # # Find the biggest contour (if detected)
-      # if len(contours) > 0:
-      #     c = max(contours, key=cv2.contourArea)
-      #     M = cv2.moments(c)
+      image = cv2.resize(image, None, fx=0.25, fy=0.25, interpolation=cv2.INTER_CUBIC)
 
-      #     x, y, w, h = cv2.boundingRect(c)
-      #     if M['m00'] != 0:
-      #       cx = int(M['m10']/M['m00'])
-      #       cy = int(M['m01']/M['m00'])
+      # Convert to gray and threshold
+      gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+      _, image_thresh = cv2.threshold(gray_image, 180, 255, 0) 
 
-      #       distance_from_center = (int(WIDTH/ 2) - cx) * -1
+      lines = cv2.HoughLines(image_thresh, 10, np.pi/180, 100)
+
+      # draw lines on image and computer error
+      if lines is not None and len(lines) > 0:
+        for rho, theta in lines[0]:
+            a = np.cos(theta)
+            b = np.sin(theta)
+            x0 = a*rho
+            y0 = b*rho
+            x1 = int(x0 + 1000*(-b))
+            y1 = int(y0 + 1000*(a))
+            x2 = int(x0 - 1000*(-b))
+            y2 = int(y0 - 1000*(a))
+            mid_x = (x1 + x2) / 2
+
+            cv2.line(image, (mid_x, y1), (mid_x, y2),(0,0,255),2)
+            cv2.line(image, (SCALED_X_CENTER, 0),(SCALED_X_CENTER, SCALED_HEIGHT),(0,255,255),2)
+
+            error = SCALED_X_CENTER - mid_x
             
-      #       # Circle indicating the center of the detected area
-      #       cv2.circle(image, (cx, cy + HEIGHT_OFFSET), 10, (255, 255, 0))
-          
-      #       # Line down the center of the image
-      #       cv2.line(image, (int(WIDTH / 2), 0), (int(WIDTH / 2),720),(255,255,0),2)
-
-      #       # Horizontal line from displaying the distance offset from the center
-      #       cv2.line(image, (cx, cy + HEIGHT_OFFSET), (int(WIDTH / 2), cy + HEIGHT_OFFSET), (255, 255, 0), 2)
-
-      #       # Box indicating detected area
-      #       cv2.rectangle(image, (x,y + HEIGHT_OFFSET), (x+w, y+h + HEIGHT_OFFSET), (0, 255, 0), 2)
-      #       distance_from_center_str = str(distance_from_center)
-            
-      #       # Text to display the value of the distance from the center
-      #       cv2.putText(image, distance_from_center_str, (cx, cy + HEIGHT_OFFSET), cv2.FONT_HERSHEY_SIMPLEX, 4, (255, 255, 0), 2, cv2.LINE_AA)
-      #       #cv2.drawContours(image, contours, -1, (0,255,0), 1)
-      #       pwm.set_pwm(ESC_PIN, 0, ESC_DRIVE)
-      #       calculate_turn_value(distance_from_center)
-      #       print(current_turn_value)
-      #       pwm.set_pwm(SERVO_PIN, 0, current_turn_value)
-
-      #       if w > HORIZ_LINE_WIDTH:
-      #         print("Horizontal Line! =====")
-      #         # Do something here to prevent horizontal line confusion
-      # else:
-          # print("Can't find the line!")
-          # pwm.set_pwm(ESC_PIN, 0, ESC_STOPPED)
+            pwm.set_pwm(ESC_PIN, 0, ESC_DRIVE)
+            calculate_turn_value(error)
+            pwm.set_pwm(SERVO_PIN, 0, current_turn_value)
+      else:
+        pwm.set_pwm(ESC_PIN, 0, ESC_STOPPED)
     
       cv2.imshow("PaceBot Camera", image)
      
-
       key = cv2.waitKey(25)
       if key == 27:
           break 
@@ -116,7 +107,6 @@ def calculate_turn_value(error):
     current_turn_value = SERVO_RIGHT
   elif (current_turn_value > SERVO_LEFT):
     current_turn_value = SERVO_LEFT
-  print(current_turn_value)
     
 @autonomous_routes.route('/video', methods=['GET'])
 def stream_video():
